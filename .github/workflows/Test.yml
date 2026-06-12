@@ -1,4 +1,4 @@
-name: Cloud PC + Web Link + Opera GX (Expose.sh Stable Edition)
+name: Cloud PC + Web Link + Opera GX (localhost.run Edition)
 
 on:
   workflow_dispatch:
@@ -16,50 +16,52 @@ jobs:
     timeout-minutes: 190
     env:
       VNC_PASS: Pass1234
-      RUNTIME_MINUTES: 180
 
     steps:
-      - name: System Cleanup & Resolution
+      - name: Setup VNC, Opera, and Bridge
         run: |
-          $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $targets = @("Unity Hub.lnk", "R 4.6.0.lnk", "Firefox.lnk", "Google Chrome.lnk", "Claim Rewards Here.lnk")
-          foreach ($target in $targets) { Remove-Item "$publicDesktop\$target" -Force -ErrorAction SilentlyContinue }
-          Set-DisplayResolution -Width 1920 -Height 1080 -Force
-
-      - name: Install VNC & Opera GX
-        run: |
+          # 1. Install VNC
           Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvnc.msi"
           Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tvnc.msi`" /quiet /qn SERVER_REGISTER_AS_SERVICE=1 SET_PASSWORD=1 VALUE_PASSWORD=${{ env.VNC_PASS }}" -Wait
+          
+          # 2. Install Opera
           Invoke-WebRequest -Uri "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx" -OutFile "$env:TEMP\OperaSetup.exe"
           Start-Process -FilePath "$env:TEMP\OperaSetup.exe" -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0" -Wait
-
-      - name: Deploy Expose.sh & noVNC
-        run: |
+          
+          # 3. Setup noVNC
           npm install -g websockify --silent
           New-Item -ItemType Directory -Path "C:\noVNC" -Force
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip" -OutFile "novnc.zip"
           Expand-Archive -Path "novnc.zip" -DestinationPath "C:\noVNC" -Force
           Copy-Item -Path "C:\noVNC\noVNC-1.5.0\*" -Destination "C:\noVNC" -Recurse -Force
-          # Install Expose.sh (the developer-friendly tunnel tool)
-          Invoke-WebRequest -Uri "https://expose.sh/packages/expose.phar" -OutFile "expose.phar"
 
       - name: Launch Web Gateway
         run: |
+          # Start bridge
           Start-Process websockify -ArgumentList "8080 localhost:5900 --web C:\noVNC"
-          Start-Sleep -Seconds 10
-          # Launch Expose.sh which provides a stable web link
-          $Proc = Start-Process php -ArgumentList "expose.phar share http://localhost:8080" -PassThru -RedirectStandardOutput "$env:TEMP\expose.log"
+          Start-Sleep -Seconds 5
+          
+          # Start Tunnel using SSH (pre-installed)
+          Write-Host "Launching tunnel... (Check the link below in 10 seconds)"
+          $cmd = "ssh -o StrictHostKeyChecking=no -R 80:localhost:8080 nokey@localhost.run"
+          # Run in background and pipe output to log
+          Start-Process ssh -ArgumentList "-o StrictHostKeyChecking=no -R 80:localhost:8080 nokey@localhost.run" -RedirectStandardOutput "$env:TEMP\tunnel.log"
+          
           Start-Sleep -Seconds 15
           
-          $Link = (Get-Content "$env:TEMP\expose.log" | Select-String -Pattern 'https://[a-zA-Z0-9-]+\.expose\.sh')[0].Matches.Value
-          $FinalUrl = "$Link/vnc.html"
-          
-          Write-Host "===================================================="
-          Write-Host "      WEB-BROWSER CLOUD PC READY (EXPOSE.SH)        "
-          Write-Host "===================================================="
-          Write-Host " URL: $FinalUrl"
-          Write-Host " PASS: ${{ env.VNC_PASS }}"
-          Write-Host "===================================================="
+          # Find the link in the log
+          $LogContent = Get-Content "$env:TEMP\tunnel.log" -Raw
+          if ($LogContent -match 'https://[a-zA-Z0-9-]+\.lhr\.life') {
+              $FinalUrl = $Matches[0] + "/vnc.html"
+              Write-Host "===================================================="
+              Write-Host "      WEB-BROWSER CLOUD PC READY (LHR.LIFE)         "
+              Write-Host "===================================================="
+              Write-Host " URL: $FinalUrl"
+              Write-Host " PASS: ${{ env.VNC_PASS }}"
+              Write-Host "===================================================="
+          } else {
+              Write-Host "Tunnel established. Look for a line in the logs containing 'lhr.life' and add /vnc.html to it."
+          }
 
       - name: Keep alive
         run: Start-Sleep -Seconds 10000
