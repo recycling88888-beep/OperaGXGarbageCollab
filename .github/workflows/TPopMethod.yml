@@ -15,6 +15,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 190
     env:
+      VNC_PASS: Pass1234
       RUNTIME_MINUTES: 180
 
     steps:
@@ -27,24 +28,30 @@ jobs:
       - name: Force Full HD Resolution
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
-      - name: Install and Configure TightVNC Server (Auth-Disabled Bypass)
+      - name: Install and Configure TightVNC Server (Silent Registry Injection)
         run: |
           Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
           Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tightvnc.msi`" /quiet /qn SERVER_REGISTER_AS_SERVICE=1" -Wait
           
           Start-Sleep -Seconds 5
           
-          # Force the Registry to COMPLETELY DISABLE authentication check requirements
-          $vncPath = "HKLM:\SOFTWARE\TightVNC\Server"
-          if (Test-Path $vncPath) {
-              Set-ItemProperty -Path $vncPath -Name "AuthRequired" -Value 0 -Type DWord
-              Set-ItemProperty -Path $vncPath -Name "AllowLoopback" -Value 1 -Type DWord
-              Set-ItemProperty -Path $vncPath -Name "LoopbackOnly" -Value 0 -Type DWord
-              Set-ItemProperty -Path $vncPath -Name "AcceptLocalConnections" -Value 1 -Type DWord
-          }
+          # Kill the background service temporarily to safely modify registry files
+          Stop-Service -Name "tvnserver" -ErrorAction SilentlyContinue
           
-          # Force refresh using the true internal msi service name identifier
-          Restart-Service -Name "tvnserver" -Force
+          # Inject configurations explicitly via standard native command shell tools to ensure true compatibility
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v AuthRequired /t REG_DWORD /d 1 /f
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v AuthType /t REG_DWORD /d 1 /f
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v AllowLoopback /t REG_DWORD /d 1 /f
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v AcceptLocalConnections /t REG_DWORD /d 1 /f
+          
+          # Explicit hexadecimal structural map for string: Pass1234
+          # This writes the binary parameters cleanly to prevent encoding corruptions
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v Password /t REG_BINARY /d 2147667a55aa6b39 /f
+          reg add "HKLM\SOFTWARE\TightVNC\Server" /v ControlPassword /t REG_BINARY /d 2147667a55aa6b39 /f
+          
+          Start-Sleep -Seconds 2
+          # Wake up the server engine with the newly configured authentication structures
+          Start-Service -Name "tvnserver"
 
       - name: Download & Force Consumer Build of Opera GX
         run: |
@@ -81,13 +88,13 @@ jobs:
           $RawLink = (Get-Content $LogFile -Raw) | Select-String -Pattern 'https://[a-zA-Z0-9-]+\.loca\.lt' | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value -First 1
           
           if ($RawLink) {
-              # FIX: We explicitly append &password= (blank) so noVNC knows not to look for input strings
-              $FinalUrl = $RawLink + "/vnc.html?autoconnect=true&password="
+              # Re-attaches our auto-login password parameter seamlessly
+              $FinalUrl = $RawLink + "/vnc.html?autoconnect=true&password=" + "${{ env.VNC_PASS }}"
               Write-Host "===================================================="
-              Write-Host "      WEB-BROWSER CLOUD PC IS READY TO CONNECT      "
+              Write-Host "     WEB-BROWSER CLOUD PC IS READY TO CONNECT      "
               Write-Host "===================================================="
               Write-Host " CLICK LINK: $FinalUrl"
-              Write-Host " SECURITY  : Blank bypass parameter enabled."
+              Write-Host " SECURITY  : Credentials embedded. Automatic bypass active."
               Write-Host "===================================================="
           } else {
               Write-Error "CRITICAL: Dynamic gateway assignment timed out."
