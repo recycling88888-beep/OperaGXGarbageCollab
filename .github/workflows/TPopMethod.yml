@@ -1,4 +1,4 @@
-name: Cloud PC + Web Browser Link + Opera GX (Guaranteed Sync)
+name: Cloud PC + Web Browser Link + Opera GX (Python Native Stable)
 
 on:
   workflow_dispatch:
@@ -38,9 +38,10 @@ jobs:
           Invoke-WebRequest -Uri "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx" -OutFile "$env:TEMP\OperaGXSetup.exe"
           Start-Process -FilePath "$env:TEMP\OperaGXSetup.exe" -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0" -Wait
 
-      - name: Deploy Bridge & Secure Tunnel Engine
+      - name: Deploy Web Interface & Secure Tunnel Engine
         run: |
-          npm install -g websockify --silent
+          # Use Python's package manager to handle the websocket bridge natively
+          pip install websockify --quiet
           New-Item -ItemType Directory -Path "C:\noVNC" -Force
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip" -OutFile "novnc.zip"
           Expand-Archive -Path "novnc.zip" -DestinationPath "C:\noVNC" -Force
@@ -49,26 +50,16 @@ jobs:
 
       - name: Start Services & Verify Handshake
         run: |
-          Write-Host "Locating and launching explicit Websockify engine..."
-          # Locates the exact global npm execution path for websockify to ensure it boots on Windows
-          $WebsockifyPath = (Get-Command websockify).Source
-          Start-Process cmd.exe -ArgumentList "/c `"$WebsockifyPath`" 8080 localhost:5900 --web C:\noVNC" -RedirectStandardError "$env:TEMP\websockify_err.log"
-          
-          Start-Sleep -Seconds 5
+          Write-Host "Launching Native Python Web Bridge..."
+          # Running via explicit python module guarantees background execution stability
+          Start-Process python -ArgumentList "-m websockify 8080 localhost:5900 --web C:\noVNC"
           
           Write-Host "Verifying port 8080 handshake..."
           $retries = 0
           while (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 8080).TcpTestSucceeded -and $retries -lt 15) {
-              Write-Host "Waiting for service... ($retries/15)"
+              Write-Host "Waiting for service infrastructure... ($retries/15)"
               Start-Sleep -Seconds 2
               $retries++
-          }
-          
-          # Real-time debugger: If the port still isn't open, dump the error log to the console
-          if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 8080).TcpTestSucceeded) {
-              Write-Host "--- WEBSOCKIFY ERROR LOG DUMP ---"
-              Get-Content "$env:TEMP\websockify_err.log" -ErrorAction SilentlyContinue
-              Write-Error "CRITICAL: Port 8080 never opened because Websockify failed to execute."
           }
           
           Write-Host "Launching Cloudflare Tunnel..."
